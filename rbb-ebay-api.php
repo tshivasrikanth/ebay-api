@@ -8,7 +8,7 @@
   Author URI: http://www.tshivasrikanth.com
  */
 
-class MySettingsPage {
+class EbayPage {
    /**
      * Start up
      */
@@ -16,20 +16,6 @@ class MySettingsPage {
         wp_register_style( 'ebayapirbbstyle', plugins_url('css/style.css',__FILE__ ));
         register_activation_hook(__FILE__, array($this, 'create_ebay_database_table'));
         add_action('admin_menu', array($this,'awesome_page_create'));
-
-        add_filter('cron_schedules', array($this, 'ebaySchedules'));
-        add_action('ebayProductsRunMe', array($this, 'ebayPullProductsApi'));
-        wp_next_scheduled('ebayProductsRunMe');
-        if (!wp_next_scheduled('ebayProductsRunMe')) {
-          wp_schedule_event(time(), 'ebay_30_sec', 'ebayProductsRunMe');
-        }
-    }
-    public function ebaySchedules($schedules) {
-        $schedules['ebay_30_sec'] = array(
-            'interval' => 30,
-            'display' => esc_html__('Every 30 Sec'),
-        );
-        return $schedules;
     }
     public function create_ebay_database_table() {
         global $wpdb;
@@ -255,21 +241,55 @@ class MySettingsPage {
         return $results;
     }
     public function ebayPullProductsApi(){
-        $searchValues = $this->getSingleSearchKey();
+        global $EbayPage;
+        global $wpdb;
+        $searchValues = $EbayPage->getSingleSearchKey();
         if(count($searchValues)){
             $searchKey = $searchValues->searchKey;
             $pageNumber = $searchValues->pageNumber+1;
             update_option('searchkey', $searchValues->searchKey);
-            $apicall = $this->constructApiUrl($pageNumber);
+            $apicall = $EbayPage->constructApiUrl($pageNumber);
             $resp = simplexml_load_file($apicall);    
             if ($resp->ack == "Success") {
                 $xml = json_decode(json_encode((array) $resp), 1);
-                $this->updateDataToEbaySearchTable($xml);
-                $this->addDataToEbayProductTable($xml);
+                $EbayPage->updateDataToEbaySearchTable($xml);
+                $EbayPage->addDataToEbayProductTable($xml);
             }
         }
     }
 }
-if (is_admin()){
-    $MySettingsPage = new MySettingsPage();
+
+global $EbayPage;
+$EbayPage = new EbayPage();
+
+class EbayCronPage {
+    public function __construct() {
+        //echo '<pre>'; print_r( _get_cron_array() ); echo '</pre>';
+        add_filter('cron_schedules', array($this,'ebay_add_cron_interval'));
+        register_activation_hook(__FILE__, array($this,'ebay_cron_activation'));
+        add_action('ebay_cron_run', array($this,'ebayCallMyFunction'));
+        register_deactivation_hook(__FILE__, array($this,'ebay_cron_deactivation'));
+    }
+    public function ebay_cron_deactivation() {
+        wp_clear_scheduled_hook('ebay_cron_run');
+    }
+    public function ebay_cron_activation(){
+        if (! wp_next_scheduled ( 'ebay_cron_run' )) {
+            wp_schedule_event(time(), 'TenMinutes', 'ebay_cron_run');
+        }
+    }
+    public function ebay_add_cron_interval( $schedules ) {
+        $schedules['TenMinutes'] = array(
+            'interval' => 600,
+            'display' => __( 'Ten Minutes' ),
+        );
+        return $schedules;
+    }
+    public function ebayCallMyFunction(){
+        global $EbayPage;
+        $EbayPage::ebayPullProductsApi();
+    }
 }
+
+global $EbayCronPage;
+$EbayCronPage = new EbayCronPage();
