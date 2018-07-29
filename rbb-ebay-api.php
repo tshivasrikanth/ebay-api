@@ -16,6 +16,20 @@ class MySettingsPage {
         wp_register_style( 'ebayapirbbstyle', plugins_url('css/style.css',__FILE__ ));
         register_activation_hook(__FILE__, array($this, 'create_ebay_database_table'));
         add_action('admin_menu', array($this,'awesome_page_create'));
+
+        add_filter('cron_schedules', array($this, 'ebaySchedules'));
+        add_action('ebayProductsRunMe', array($this, 'ebayPullProductsApi'));
+        wp_next_scheduled('ebayProductsRunMe');
+        if (!wp_next_scheduled('ebayProductsRunMe')) {
+          wp_schedule_event(time(), 'ebay_30_sec', 'ebayProductsRunMe');
+        }
+    }
+    public function ebaySchedules($schedules) {
+        $schedules['ebay_30_sec'] = array(
+            'interval' => 30,
+            'display' => esc_html__('Every 30 Sec'),
+        );
+        return $schedules;
     }
     public function create_ebay_database_table() {
         global $wpdb;
@@ -61,7 +75,6 @@ class MySettingsPage {
         include 'products-file.php';
     }
     public function ebay_api_page_display() {
-        $this->pullProductsApi();
         if (!current_user_can('manage_options')) {
             wp_die('Unauthorized user');
         }
@@ -102,7 +115,7 @@ class MySettingsPage {
         $searchKeyResults = $this->getSearchKeyResults();
         include 'form-file.php';
     }
-    public function constructApiUrl(){
+    public function constructApiUrl($pageNo){
         // API request variables
         $endpoint = 'http://svcs.ebay.com/services/search/FindingService/v1';  // URL to call
         $version = '1.0.0';  // API version supported by your application
@@ -119,14 +132,16 @@ class MySettingsPage {
         $apicall .= "&GLOBAL-ID=$globalid";
         $apicall .= "&keywords=$safequery";
         $apicall .= "&paginationInput.entriesPerPage=10";
+        $apicall .= "&paginationInput.pageNumber=$pageNo";
         return $apicall;
     }
     public function call_ebay_api(){
-        $apicall = $this->constructApiUrl();
+        $apicall = $this->constructApiUrl(1);
         $resp = simplexml_load_file($apicall);
         if ($resp->ack == "Success") {
             $xml = json_decode(json_encode((array) $resp), 1);
-            $this->saveDataInDatabase($xml);
+            $this->addDataToEbaySearchTable($xml);
+            $this->addDataToEbayProductTable($xml);
             $results =  "Search Key is Successfully saved";
         }
         else {
@@ -135,7 +150,14 @@ class MySettingsPage {
         }  
         return $results;
     }
-    public function saveDataInDatabase($data){
+    public function updateDataToEbaySearchTable($data){
+        global $wpdb;
+        $ebaySearched = $wpdb->prefix.'EbaySearched';
+        $ebaySearchedWhereA['searchKey'] = get_option('searchkey');
+        $ebaySearchedA['pageNumber'] = $data['paginationOutput']['pageNumber'];
+        $wpdb->update($ebaySearched, $ebaySearchedA, $ebaySearchedWhereA);
+    }
+    public function addDataToEbaySearchTable($data){
         global $wpdb;
         $ebaySearched = $wpdb->prefix.'EbaySearched';
         $ebaySearchedA['id'] = "";
@@ -144,6 +166,9 @@ class MySettingsPage {
         $ebaySearchedA['totalPages'] = $data['paginationOutput']['totalPages'];
         $ebaySearchedA['timestamp'] = $data['timestamp'];
         $this->sendToTable($ebaySearched,$ebaySearchedA);
+    }
+    public function addDataToEbayProductTable($data){
+        global $wpdb;
         $catA = $this->excludeCategories();
         $ebayProducts = $wpdb->prefix.'EbayProducts';
         $items = $data['searchResult']['item'];
@@ -226,12 +251,23 @@ class MySettingsPage {
     public function getSingleSearchKey(){
         global $wpdb;
         $ebaySearched = $wpdb->prefix.'EbaySearched';
-        $results = $wpdb->get_row( "SELECT searchKey FROM $ebaySearched WHERE id > 0 ORDER BY RAND() LIMIT 1", OBJECT );
-        return $results->searchKey;
+        $results = $wpdb->get_row( "SELECT searchKey,pageNumber FROM $ebaySearched WHERE id > 0 ORDER BY RAND() LIMIT 1", OBJECT );
+        return $results;
     }
-    public function pullProductsApi(){
-        $searchKey = $this->getSingleSearchKey();
-        update_option('searchkey', $searchKey);
+    public function ebayPullProductsApi(){
+        $searchValues = $this->getSingleSearchKey();
+        if(count($searchValues)){
+            $searchKey = $searchValues->searchKey;
+            $pageNumber = $searchValues->pageNumber+1;
+            update_option('searchkey', $searchValues->searchKey);
+            $apicall = $this->constructApiUrl($pageNumber);
+            $resp = simplexml_load_file($apicall);    
+            if ($resp->ack == "Success") {
+                $xml = json_decode(json_encode((array) $resp), 1);
+                $this->updateDataToEbaySearchTable($xml);
+                $this->addDataToEbayProductTable($xml);
+            }
+        }
     }
 }
 if (is_admin()){
