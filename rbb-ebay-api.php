@@ -13,9 +13,12 @@ class EbayPage {
      * Start up
      */
     public function __construct() {
-        wp_register_style( 'ebayapirbbstyle', plugins_url('css/style.css',__FILE__ ));
+        add_action('wp_loaded', array($this,'ebayAddStyles'))
         register_activation_hook(__FILE__, array($this, 'create_ebay_database_table'));
         add_action('admin_menu', array($this,'awesome_page_create'));
+    }
+    public function ebayAddStyles() {
+        wp_register_style( 'ebayapirbbstyle', plugins_url('css/style.css',__FILE__ ));
     }
     public function create_ebay_database_table() {
         global $wpdb;
