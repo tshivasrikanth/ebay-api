@@ -1,11 +1,11 @@
 <?php
 /*
-  Plugin Name: Ebay API (RBB)
-  Plugin URI: http://www.rentbuybash.com
+  Plugin Name: Ebay API
+  Plugin URI: http://www.tshivasrikanth.com
   Description: This is ebay API plugin, custom options with amdin setting page.
-  Author: Jordan R
+  Author: Shiva Srikanth T
   Version: 1.0
-  Author URI: http://www.rentbuybash.com
+  Author URI: http://www.tshivasrikanth.com
  */
 
 class MySettingsPage {
