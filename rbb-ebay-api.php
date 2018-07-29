@@ -13,7 +13,7 @@ class EbayPage {
      * Start up
      */
     public function __construct() {
-        add_action('wp_loaded', array($this,'ebayAddStyles'))
+        add_action('wp_loaded', array($this,'ebayAddStyles'));
         register_activation_hook(__FILE__, array($this, 'create_ebay_database_table'));
         add_action('admin_menu', array($this,'awesome_page_create'));
     }
