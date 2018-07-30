@@ -1,11 +1,11 @@
 <?php
 /*
   Plugin Name: Ebay API
-  Plugin URI: http://www.tshivasrikanth.com
+  Plugin URI: 
   Description: This is ebay API plugin, custom options with amdin setting page.
-  Author: Shiva Srikanth T
+  Author: Jordan R
   Version: 1.0
-  Author URI: http://www.tshivasrikanth.com
+  Author URI: 
  */
 
 class EbayPage {
@@ -66,6 +66,7 @@ class EbayPage {
     public function ebay_api_page_display() {
         //global $EbayCommerce;
         //$EbayCommerce->processEbayProducts();
+        //$this->updateAllProductRows();
         if (!current_user_can('manage_options')) {
             wp_die('Unauthorized user');
         }
@@ -170,6 +171,7 @@ class EbayPage {
             $ebayProductsA['itemId'] = $item['itemId'];
             $ebayProductsA['categoryId'] = $item['primaryCategory']['categoryId'];
             $ebayProductsA['categoryName'] = $catName;
+            $ebayProductsA['addedtocommerce'] = 0;
             $ebayProductsA['itemObject'] = serialize($itemObject);
             $itemFound = $this->getProductCountOfItemId($item['itemId']);
             if(!$itemFound){
@@ -271,6 +273,11 @@ class EbayPage {
             }
         }
     }
+    public function updateAllProductRows(){
+      global $wpdb;
+      $ebayProducts = $wpdb->prefix.'EbayProducts';
+      $wpdb->query("UPDATE $ebayProducts SET addedtocommerce = 0 WHERE itemid > 0");
+    }
 }
 
 global $EbayPage;
@@ -364,7 +371,6 @@ class EbayCommerce {
         update_post_meta( $post_id, '_stock', '' );
         $this->updateProductRow($prodObj['itemId']);
     }
-
     public function updateProductRow($itemId){
         global $wpdb;
         $ebayProducts = $wpdb->prefix.'EbayProducts';
