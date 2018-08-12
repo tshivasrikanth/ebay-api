@@ -17,6 +17,30 @@
                 <input type="text" class="regular-text" name="searchkey" id="searchkey" value="<?php echo $searchKey; ?>">
             </td>
         </tr>
+        <tr>
+            <th scope="row">
+                <label for="trackingid">Tracking Id</label>
+            </th>
+            <td>
+                <input type="text" class="regular-text" name="trackingid" id="trackingid" value="<?php echo $trackingId; ?>">
+            </td>
+        </tr>
+        <tr>
+            <th scope="row">
+                <label for="customerid">Customer Id</label>
+            </th>
+            <td>
+                <input type="text" class="regular-text" name="customerid" id="customerid" value="<?php echo $customerId; ?>">
+            </td>
+        </tr>
+        <tr>
+            <th scope="row">
+                <label for="networkid">Network Id</label>
+            </th>
+            <td>
+                <input type="text" class="regular-text" name="networkid" id="networkid" value="<?php echo $networkId; ?>">
+            </td>
+        </tr>
         <?php if(count($categoriesResults)){?>
         <tr>
             <th scope="row">

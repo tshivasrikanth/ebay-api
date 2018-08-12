@@ -64,9 +64,9 @@ class EbayPage {
         include 'products-file.php';
     }
     public function ebay_api_page_display() {
-        //global $EbayCommerce;
-        //$EbayCommerce->processEbayProducts();
         //$this->updateAllProductRows();
+		//global $EbayCommerce;
+		//$EbayCommerce->processEbayProducts();
         if (!current_user_can('manage_options')) {
             wp_die('Unauthorized user');
         }
@@ -82,10 +82,22 @@ class EbayPage {
         if (isset($_POST['apikey'])) {
             $value = sanitize_text_field($_POST['apikey']);
             update_option('ebayapikey', $value);
+
             $searchKey = sanitize_text_field($_POST['searchkey']);
             update_option('searchkey', $searchKey);
+
+            $trackingId = sanitize_text_field($_POST['trackingid']);
+            update_option('trackingid', $trackingId);
+
+            $customerId = sanitize_text_field($_POST['customerid']);
+            update_option('customerid', $customerId);
+
+            $networkId = sanitize_text_field($_POST['networkid']);
+            update_option('networkid', $networkId);
+
             $categoryKey = sanitize_text_field($_POST['categorykey']);
             update_option('categorykey', $categoryKey);
+
             if(count($categoriesResults)){
                 foreach($categoriesResults as $key => $catItem){
                     $catFlag = 0;
@@ -94,8 +106,12 @@ class EbayPage {
                 }
             }
         }
+
         $value = get_option('ebayapikey');
         $searchKey = get_option('searchkey');
+        $trackingId = get_option('trackingid');
+        $customerId = get_option('customerid');
+        $networkId = get_option('networkid');
         $categoryKey = get_option('categorykey');
         if (isset($_POST['searchkey'])) {
             if($this->checkForDbValue($searchKey)){
@@ -115,6 +131,9 @@ class EbayPage {
         $globalid = 'EBAY-US';  // Global ID of the eBay site you want to search (e.g., EBAY-DE)
         $query = get_option('searchkey');  // You may want to supply your own query
         $safequery = urlencode($query);  // Make the query URL-friendly
+        $trackingId = get_option('trackingid');
+        $customerId = get_option('customerid');
+        $networkId = get_option('networkid');
         $i = '0';  // Initialize the item filter index to 0
         // Construct the findItemsByKeywords HTTP GET call 
         $apicall = "$endpoint?";
@@ -125,6 +144,10 @@ class EbayPage {
         $apicall .= "&keywords=$safequery";
         $apicall .= "&paginationInput.entriesPerPage=10";
         $apicall .= "&paginationInput.pageNumber=$pageNo";
+		$apicall .= "&outputSelector(0)=PictureURLLarge";
+		$apicall .= "&affiliate.networkId=$networkId";
+		$apicall .= "&affiliate.trackingId=$trackingId";
+		$apicall .= "&affiliate.customId=$customerId";
         return $apicall;
     }
     public function call_ebay_api(){
@@ -186,7 +209,9 @@ class EbayPage {
         }
     }
     public function excludeCategories(){
-        $categoryIdsA = $this->listCategoryIds();
+		global $EbayPage;
+		$EbayPage = new EbayPage();
+        $categoryIdsA = $EbayPage->listCategoryIds();
         if(count($categoryIdsA)){
             foreach($categoryIdsA as $key => $catItem){
                 $excludeCat = get_option($key);
@@ -338,15 +363,21 @@ class EbayCommerce {
         return $schedules;
     }
     public function addProductsToWooCommerce($prodObj){
+
+		require_once(ABSPATH . 'wp-admin/includes/media.php');
+		require_once(ABSPATH . 'wp-admin/includes/file.php');
+		require_once(ABSPATH . 'wp-admin/includes/image.php');
+
         $user_id = get_current_user();
         $post_id = wp_insert_post( array(
             'post_author' => $user_id,
             'post_title' => $prodObj['title'],
             'post_content' => 'Here is content of the post, so this is our great new products description',
-            'post_status' => 'publish',
+            'post_status' => 'draft',
             'post_type' => "product",
         ));
-        wp_set_object_terms( $post_id, 'simple', 'product_type' );
+        wp_set_object_terms( $post_id, 'external', 'product_type' );
+        update_post_meta( $post_id, '_product_url', $prodObj['viewItemURL'] );
         update_post_meta( $post_id, '_visibility', 'visible' );
         update_post_meta( $post_id, '_stock_status', 'instock');
         update_post_meta( $post_id, 'total_sales', '0' );
@@ -369,7 +400,15 @@ class EbayCommerce {
         update_post_meta( $post_id, '_manage_stock', 'no' );
         update_post_meta( $post_id, '_backorders', 'no' );
         update_post_meta( $post_id, '_stock', '' );
+		
         $this->updateProductRow($prodObj['itemId']);
+		
+		if(strlen($prodObj['pictureURLLarge'])){
+			$media = media_sideload_image($prodObj['pictureURLLarge'], $post_id);
+		}else if(strlen($prodObj['galleryURL'])){
+			$media = media_sideload_image($prodObj['galleryURL'], $post_id);
+		}
+		$this->addImageToMediaLibrabry($media,$post_id);
     }
     public function updateProductRow($itemId){
         global $wpdb;
@@ -379,11 +418,20 @@ class EbayCommerce {
         $wpdb->update($ebayProducts, $ebayProductsA, $ebayProductsWhereA);
     }
     public function getProductsForCommerce(){
-        global $wpdb;
+		global $EbayPage;
+		$EbayPage = new EbayPage();
+		global $wpdb;
+        $excludeStr = "";
+        $categoryIdsA = $EbayPage->excludeCategories();
+        if(count($categoryIdsA)){
+            $excludeStr = "AND categoryName NOT IN ('";
+            $excludeStr .= implode("','",$categoryIdsA);
+            $excludeStr .= "')";
+        }        
         $ebayProducts = $wpdb->prefix.'EbayProducts';
-        $query = "SELECT itemObject FROM $ebayProducts WHERE id > 0 AND addedtocommerce = 0 ORDER BY id ASC LIMIT 25";
+        $query = "SELECT * FROM $ebayProducts WHERE id > 0 $excludeStr AND addedtocommerce = 0 ORDER BY id ASC LIMIT 10";
         $results = $wpdb->get_results( $query, OBJECT );
-        return $results;
+		return $results;
     }
     public function processEbayProducts(){
         $pResults = $this->getProductsForCommerce();
@@ -392,6 +440,34 @@ class EbayCommerce {
             $this->addProductsToWooCommerce($procProd);
         }
     }
+	public function addImageToMediaLibrabry($media,$post_id){
+		// therefore we must find it so we can set it as featured ID
+        if(!empty($media) && !is_wp_error($media)){
+            $args = array(
+                'post_type' => 'attachment',
+                'posts_per_page' => -1,
+                'post_status' => 'any',
+                'post_parent' => $post_id
+            );
+
+            // reference new image to set as featured
+            $attachments = get_posts($args);
+
+            if(isset($attachments) && is_array($attachments)){
+                foreach($attachments as $attachment){
+                    // grab source of full size images (so no 300x150 nonsense in path)
+                    $image = wp_get_attachment_image_src($attachment->ID, 'full');
+                    // determine if in the $media image we created, the string of the URL exists
+                    if(strpos($media, $image[0]) !== false){
+                        // if so, we found our image. set it as thumbnail
+                        set_post_thumbnail($post_id, $attachment->ID);
+                        // only want one image
+                        break;
+                    }
+                }
+            }
+        }
+	}
 }
 
 global $EbayCommerce;
