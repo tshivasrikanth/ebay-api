@@ -32,7 +32,7 @@ class EbayPage {
     public function create_ebay_products_db_table($table_name) {
         global $wpdb;
         if ($wpdb->get_var("show tables like '$table_name'") != $table_name) {
-            $sql = 'CREATE TABLE ' . $table_name . ' ( `id` INTEGER(10) UNSIGNED AUTO_INCREMENT PRIMARY KEY, `itemId` VARCHAR(255), `categoryId` VARCHAR(225), `categoryName` VARCHAR(255), `addedtocommerce` tinyint(1),`itemObject` BLOB)';
+            $sql = 'CREATE TABLE ' . $table_name . ' ( `id` INTEGER(10) UNSIGNED AUTO_INCREMENT PRIMARY KEY, `itemId` VARCHAR(255), `categoryId` VARCHAR(225), `categoryName` VARCHAR(255), `addedtocommerce` tinyint(1), `post_id` INTEGER(10) UNSIGNED,`itemObject` BLOB)';
             require_once( ABSPATH . '/wp-admin/includes/upgrade.php' );
             dbDelta($sql);
         }
@@ -40,7 +40,7 @@ class EbayPage {
     public function create_ebay_products_des_db_table($table_name) {
         global $wpdb;
         if ($wpdb->get_var("show tables like '$table_name'") != $table_name) {
-            $sql = 'CREATE TABLE ' . $table_name . ' ( `id` INTEGER(10) UNSIGNED AUTO_INCREMENT PRIMARY KEY, `itemId` VARCHAR(255), `timeStamp` VARCHAR(255),`itemObjectDes` BLOB)';
+            $sql = 'CREATE TABLE ' . $table_name . ' ( `id` INTEGER(10) UNSIGNED AUTO_INCREMENT PRIMARY KEY, `itemId` VARCHAR(255), `timeStamp` TIMESTAMP, `updated` tinyint(1), `itemObjectDes` BLOB)';
             require_once( ABSPATH . '/wp-admin/includes/upgrade.php' );
             dbDelta($sql);
         }
@@ -76,11 +76,12 @@ class EbayPage {
 	public function processForTesting(){
 		echo "Testing Enabled";
 		//$this->updateAllProductRows();
-		//global $EbayCommerce;
-		//$EbayCommerce->processEbayProducts();
-		//$EbayCommerce->processCategoryOfProduct();
 		//global $EbayUpDtProdDes;
 		//$EbayUpDtProdDes->updateEbayProducts();
+		//global $EbayCommerce;
+		//$EbayCommerce->processEbayProducts();
+		//global $EbayUpdateProductsForEach;
+		//$EbayUpdateProductsForEach->updateEbayEachItem();
 		die;
 	}
     public function ebay_api_page_display() {
@@ -215,6 +216,7 @@ class EbayPage {
             $ebayProductsA['categoryId'] = $item['primaryCategory']['categoryId'];
             $ebayProductsA['categoryName'] = $catName;
             $ebayProductsA['addedtocommerce'] = 0;
+            $ebayProductsA['post_id'] = 0;
             $ebayProductsA['itemObject'] = serialize($itemObject);
             $itemFound = $this->getProductCountOfItemId($ebayProducts,array("itemId" => $item['itemId']));
             if(!$itemFound){
@@ -374,13 +376,13 @@ class EbayCommerce {
     }
     public function ebay_comm_cron_activation(){
         if (! wp_next_scheduled ( 'ebay_comm_cron_run' )) {
-            wp_schedule_event(time(), 'ThirtyThreeMinutes', 'ebay_comm_cron_run');
+            wp_schedule_event(time(), 'TwentyThreeMinutes', 'ebay_comm_cron_run');
         }
     }
     public function ebay_add_comm_cron_interval( $schedules ) {
-        $schedules['ThirtyThreeMinutes'] = array(
-            'interval' => 1980,
-            'display' => __( 'Every 33 Minutes' ),
+        $schedules['TwentyThreeMinutes'] = array(
+            'interval' => 1380,
+            'display' => __( 'Every 23 Minutes' ),
         );
         return $schedules;
     }
@@ -435,7 +437,7 @@ class EbayCommerce {
         update_post_meta( $post_id, '_backorders', 'no' );
         update_post_meta( $post_id, '_stock', '' );
 		
-        $this->updateProductRow($prodObj1['itemId']);
+        $this->updateProductRow($prodObj1['itemId'],$post_id);
 		
 		if(strlen($prodObj1['pictureURLLarge'])){
 			$media = media_sideload_image($prodObj1['pictureURLLarge'], $post_id);
@@ -448,11 +450,12 @@ class EbayCommerce {
 		if(count($term_ids)) wp_set_object_terms($post_id, $term_ids, 'product_cat');
 
     }
-    public function updateProductRow($itemId){
+    public function updateProductRow($itemId,$post_id){
         global $wpdb;
         $ebayProducts = $wpdb->prefix.'EbayProducts';
         $ebayProductsWhereA['itemId'] = $itemId;
         $ebayProductsA['addedtocommerce'] = 1;
+        $ebayProductsA['post_id'] = $post_id;
         $wpdb->update($ebayProducts, $ebayProductsA, $ebayProductsWhereA);
     }
     public function getProductsForCommerce(){
@@ -479,13 +482,47 @@ class EbayCommerce {
         $results = $wpdb->get_results( $query, OBJECT );
 		return $results;
 	}
-    public function processEbayProducts(){
+	public function getProductsToUpdate(){
+		global $wpdb;
+		$ebayProducts = $wpdb->prefix.'EbayProducts';
+		$ebayProductsDesc = $wpdb->prefix.'EbayProductsDesc';
+		$query = "SELECT ep.post_id,epd.itemObjectDes FROM $ebayProductsDesc as epd LEFT JOIN $ebayProducts as ep on epd.itemId = ep.itemId WHERE epd.updated = 1 LIMIT 10";
+        $results = $wpdb->get_results( $query, OBJECT );
+		return $results;
+	}
+	public function processNewProducts(){
 		$pResults = $this->getProductsFromDesTable();
         foreach($pResults as $prodval){
             $procProd1 = unserialize($prodval->itemObject);
             $procProd2 = unserialize($prodval->itemObjectDes);
             $this->addProductsToWooCommerce($procProd1,$procProd2);
         }
+	}
+	public function updateProductsToWooCommerce($post_id,$procProdObj){
+		update_post_meta( $post_id, '_price', $procProdObj['CurrentPrice']);
+		update_post_meta( $post_id, '_regular_price', $procProdObj['CurrentPrice']);
+		update_post_meta( $post_id, '_sale_price', $procProdObj['CurrentPrice']);
+		$this->updateProdDesTable($procProdObj['ItemID']);
+	}
+	public function updateProdDesTable($itemId){
+		global $wpdb;
+		$table = $wpdb->prefix.'EbayProductsDesc';
+		$date = new DateTime();
+        $ebayProductsDescWhereA['itemId'] = $itemId;
+		$ebayProductsDescA['updated'] = 0;
+        $wpdb->update($table, $ebayProductsDescA, $ebayProductsDescWhereA);
+	}
+	public function processOldProducts(){
+		$pResults = $this->getProductsToUpdate();
+        foreach($pResults as $prodval){
+            $post_id = $prodval->post_id;
+            $procProdObj = unserialize($prodval->itemObjectDes);
+            $this->updateProductsToWooCommerce($post_id,$procProdObj);
+        }
+	}
+    public function processEbayProducts(){
+		$this->processNewProducts();
+		$this->processOldProducts();
     }
 	public function addImageToMediaLibrabry($media,$post_id){
 		// therefore we must find it so we can set it as featured ID
@@ -515,18 +552,6 @@ class EbayCommerce {
             }
         }
 	}
-	/*public function processCategoryOfProduct(){
-		global $wpdb;
-		$ebayProducts = $wpdb->prefix.'EbayProducts';
-		$ebayProductsDesc = $wpdb->prefix.'EbayProductsDesc';
-		$query = "SELECT epd.itemObjectDes FROM $ebayProductsDesc as epd WHERE id > 0 ORDER BY epd.id ASC LIMIT 10";
-		$results = $wpdb->get_results( $query, OBJECT );
-		foreach($results as $prodval){
-			$procProd2 = unserialize($prodval->itemObjectDes);
-			$this->createAndAttachCategories($procProd2);
-		}
-		die;
-	}*/
 	public function createAndAttachCategories($procProd2){
 		$SpecificsA = $procProd2['ItemSpecifics']['NameValueList'];
 		$parent_cat = "";
@@ -566,7 +591,8 @@ class EbayCommerce {
 							'slug' => str_replace(" ","_",$term),
 							'parent' => $parentId,
 						));
-			$term_id = $cat['term_id'];
+			$catA = (array) $cat;
+			$term_id = $catA['term_id'];
 		}else{
 			$term_id = $cat->term_id;
 		}
@@ -589,13 +615,13 @@ class EbayUpDtProdDes {
     }
     public function ebay_prod_cron_activation(){
         if (! wp_next_scheduled ( 'ebay_prod_cron_run' )) {
-            wp_schedule_event(time(), 'TwentySevenMinutes', 'ebay_prod_cron_run');
+            wp_schedule_event(time(), 'NineteenMinutes', 'ebay_prod_cron_run');
         }
     }
     public function ebay_add_prod_cron_interval( $schedules ) {
-        $schedules['TwentySevenMinutes'] = array(
-            'interval' => 1620,
-            'display' => __( 'Every 27 Minutes' ),
+        $schedules['NineteenMinutes'] = array(
+            'interval' => 1140,
+            'display' => __( 'Every 19 Minutes' ),
         );
         return $schedules;
     }
@@ -612,6 +638,8 @@ class EbayUpDtProdDes {
 	}
 	// Use itemId from selected most watched item as input for a GetMultipleItems call
 	public function getSingleItemResults ($selectedItemIDs) {
+		global $EbayUpDtProdDes;
+		$EbayUpDtProdDes = new EbayUpDtProdDes();
 		$s_endpoint = "http://open.api.ebay.com/shopping?";  // Shopping URL to call
 		$appid = get_option('ebayapikey');  // You will need to supply your own AppID
 		$responseEncoding = 'XML';  // Type of response we want back
@@ -629,22 +657,28 @@ class EbayUpDtProdDes {
 		$resp = simplexml_load_file($apicallb);
 		if ($resp->Ack == "Success") {
             $xml = json_decode(json_encode((array) $resp), 1);
-            $this->addDataToEbayProductDesTable($xml);
+            $EbayUpDtProdDes->addDataToEbayProductDesTable($xml);
         }
 	}
 	
 	public function addDataToEbayProductDesTable($data){
         global $wpdb;
 		global $EbayPage;
+		if(!count($data['Item'][0]) && count($data['Item'])){
+			$dataM['Item'][0] = $data['Item'];
+		}else{
+			$dataM = $data;
+		}
 		$EbayPage = new EbayPage();
         $ebayProductsDesc = $wpdb->prefix.'EbayProductsDesc';
-        $items = $data['Item'];
+        $items = $dataM['Item'];
 		$date = new DateTime();
         foreach($items as $item){
             $itemObjectDes = $item;
             $ebayProductsDescA['id'] = "";
             $ebayProductsDescA['itemId'] = $item['ItemID'];
-            $ebayProductsDescA['timeStamp'] = $date->getTimestamp();
+            $ebayProductsDescA['timeStamp'] = gmdate('Y-m-d H:i:s');
+            $ebayProductsDescA['updated'] = 0;
             $ebayProductsDescA['itemObjectDes'] = serialize($itemObjectDes);
 			$itemFound = $EbayPage->getProductCountOfItemId($ebayProductsDesc,array("itemId" => $item['ItemID']));
 			if(!$itemFound){
@@ -658,7 +692,8 @@ class EbayUpDtProdDes {
         global $wpdb;
 		$date = new DateTime();
         $ebayProductsDescWhereA['itemId'] = $itemId;
-		$ebayProductsDescA['timeStamp'] = $date->getTimestamp();
+		$ebayProductsDescA['timeStamp'] = gmdate('Y-m-d H:i:s');
+		$ebayProductsDescA['updated'] = 1;
 		$ebayProductsDescA['itemObjectDes'] = serialize($itemObjectDes);
         $wpdb->update($table, $ebayProductsDescA, $ebayProductsDescWhereA);
     }
@@ -667,3 +702,47 @@ class EbayUpDtProdDes {
 
 global $EbayUpDtProdDes;
 $EbayUpDtProdDes = new EbayUpDtProdDes();
+
+class EbayUpdateProductsForEach {
+    public function __construct() {
+        add_filter('cron_schedules', array($this,'ebay_add_each_item_cron_interval'));
+        register_activation_hook(__FILE__, array($this,'ebay_each_item_cron_activation'));
+        add_action('ebay_each_item_cron_run', array($this,'updateEbayEachItem'));
+        register_deactivation_hook(__FILE__, array($this,'ebay_each_item_cron_deactivation'));
+    }
+    public function ebay_each_item_cron_deactivation() {
+        wp_clear_scheduled_hook('ebay_each_item_cron_run');
+    }
+    public function ebay_each_item_cron_activation(){
+        if (! wp_next_scheduled ( 'ebay_each_item_cron_run' )) {
+            wp_schedule_event(time(), 'TwentySevenMinutes', 'ebay_each_item_cron_run');
+        }
+    }
+    public function ebay_add_each_item_cron_interval( $schedules ) {
+        $schedules['TwentySevenMinutes'] = array(
+            'interval' => 1620,
+            'display' => __( 'Every 27 Minutes' ),
+        );
+        return $schedules;
+    }
+	public function getProductsToProcEach(){
+		global $wpdb;
+		$ebayProductsDesc = $wpdb->prefix.'EbayProductsDesc';
+		$query = "SELECT epd.itemId FROM $ebayProductsDesc as epd WHERE epd.timeStamp < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR) LIMIT 10";
+		$results = $wpdb->get_results( $query, OBJECT );
+		return $results;
+	}
+	public function updateEbayEachItem(){
+		global $EbayUpDtProdDes;
+		$pResults = $this->getProductsToProcEach();
+		$items = array();
+		foreach($pResults as $prodval){
+			$items[] = $prodval->itemId; 
+        }
+		$itemSrt = implode(",",$items);		
+		$EbayUpDtProdDes->getSingleItemResults($itemSrt);
+	}
+}
+
+global $EbayUpdateProductsForEach;
+$EbayUpdateProductsForEach = new EbayUpdateProductsForEach();
