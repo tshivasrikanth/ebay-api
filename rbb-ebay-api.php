@@ -63,10 +63,49 @@ class EbayPage {
         $parent_slug = $menu_slug;
         $s_page_title = 'Ebay Products';
         $s_menu_title = 'Ebay Products';
-        $s_capability = 'manage_options';
         $s_menu_slug = 'ebay_products_rbb';
         $s_function = array($this,'ebay_products_page_display');
         add_submenu_page( $parent_slug, $s_page_title, $s_menu_title, $capability, $s_menu_slug, $s_function);
+        $st_page_title = 'Ebay Settings';
+        $st_menu_title = 'Ebay Settings';
+        $st_menu_slug = 'ebay_settings_rbb';
+        $st_function = array($this,'ebay_settings_page_display');
+        add_submenu_page( $parent_slug, $st_page_title, $st_menu_title, $capability, $st_menu_slug, $st_function);
+    }
+    public function ebay_settings_page_display() {
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized user');
+        }
+        if (!empty($_POST))
+        {
+            if (! isset( $_POST['_wpnonce'] ) || ! wp_verify_nonce( $_POST['_wpnonce'], 'EbayNonce' ) )
+            {
+                print 'Sorry, your nonce did not verify.';
+                exit;
+            }
+        }
+		if (isset($_POST['apikey']) && strlen($_POST['apikey']) ) {
+            $value = sanitize_text_field($_POST['apikey']);
+            update_option('ebayapikey', $value);
+		}
+		if (isset($_POST['trackingid']) && strlen($_POST['trackingid']) ) {
+            $trackingId = sanitize_text_field($_POST['trackingid']);
+            update_option('trackingid', $trackingId);
+		}
+		if (isset($_POST['customerid']) && strlen($_POST['customerid']) ) {
+            $customerId = sanitize_text_field($_POST['customerid']);
+            update_option('customerid', $customerId);
+		}
+		if (isset($_POST['networkid']) && strlen($_POST['networkid']) ) {
+            $networkId = sanitize_text_field($_POST['networkid']);
+            update_option('networkid', $networkId);
+        }
+
+        $value = get_option('ebayapikey');
+        $trackingId = get_option('trackingid');
+        $customerId = get_option('customerid');
+        $networkId = get_option('networkid');
+        include 'settings-file.php';
     }
     public function ebay_products_page_display() {
         wp_enqueue_style('ebayapirbbstyle');
@@ -100,21 +139,10 @@ class EbayPage {
             }
         }
         $categoriesResults = $this->listCategoryIds();
-        if (isset($_POST['apikey'])) {
-            $value = sanitize_text_field($_POST['apikey']);
-            update_option('ebayapikey', $value);
+        if (isset($_POST['searchkey'])) {
 
             $searchKey = sanitize_text_field($_POST['searchkey']);
             update_option('searchkey', $searchKey);
-
-            $trackingId = sanitize_text_field($_POST['trackingid']);
-            update_option('trackingid', $trackingId);
-
-            $customerId = sanitize_text_field($_POST['customerid']);
-            update_option('customerid', $customerId);
-
-            $networkId = sanitize_text_field($_POST['networkid']);
-            update_option('networkid', $networkId);
 
             $categoryKey = sanitize_text_field($_POST['categorykey']);
             update_option('categorykey', $categoryKey);
@@ -128,11 +156,7 @@ class EbayPage {
             }
         }
 
-        $value = get_option('ebayapikey');
         $searchKey = get_option('searchkey');
-        $trackingId = get_option('trackingid');
-        $customerId = get_option('customerid');
-        $networkId = get_option('networkid');
         $categoryKey = get_option('categorykey');
         if (isset($_POST['searchkey'])) {
             if($this->checkForDbValue($searchKey)){
@@ -141,9 +165,21 @@ class EbayPage {
                 $results = $this->call_ebay_api();
             }
         }
+		if(count($_POST['delete_list'])){
+			$this->deleteSearchKeys($_POST['delete_list']);
+		}
         $searchKeyResults = $this->getSearchKeyResults();
         include 'form-file.php';
     }
+	public function deleteSearchKeys($deleteA){
+		global $wpdb;
+		$ebaySearched = $wpdb->prefix.'EbaySearched';
+		$qStr = "DELETE FROM $ebaySearched WHERE ";
+		$qStr .= "searchKey IN ('";
+		$qStr .= implode("','",$deleteA);
+		$qStr .= "')";
+		$wpdb->query( $qStr );
+	}
     public function constructApiUrl($pageNo){
         // API request variables
         $endpoint = 'http://svcs.ebay.com/services/search/FindingService/v1';  // URL to call
